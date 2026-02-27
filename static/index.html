@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RVC PTH to ONNX Exporter</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2rem;
+            background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .card-title {
+            font-size: 1.2rem;
+            margin-bottom: 16px;
+            color: #00d2ff;
+        }
+        .upload-area {
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 16px;
+        }
+        .upload-area:hover {
+            border-color: #00d2ff;
+            background: rgba(0, 210, 255, 0.05);
+        }
+        .upload-area.dragover {
+            border-color: #00d2ff;
+            background: rgba(0, 210, 255, 0.1);
+        }
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        .file-input {
+            display: none;
+        }
+        .file-list {
+            margin-top: 16px;
+        }
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .file-name {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .remove-btn {
+            background: #ff4757;
+            border: none;
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .option-group label {
+            display: block;
+            margin-bottom: 6px;
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+        .option-group input {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            font-size: 1rem;
+        }
+        .option-group input:focus {
+            outline: none;
+            border-color: #00d2ff;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+        .checkbox-group label {
+            color: #aaa;
+            font-size: 0.95rem;
+            cursor: pointer;
+        }
+        .checkbox-group .hint {
+            color: #666;
+            font-size: 0.8rem;
+            margin-left: 8px;
+        }
+        .model-info {
+            background: rgba(0, 210, 255, 0.1);
+            border: 1px solid rgba(0, 210, 255, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        .model-info.show {
+            display: block;
+        }
+        .model-info-title {
+            font-size: 1rem;
+            color: #00d2ff;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .model-info-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+        .model-info-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .model-info-item label {
+            display: block;
+            font-size: 0.75rem;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .model-info-item span {
+            font-size: 0.95rem;
+            color: #fff;
+            font-weight: 500;
+        }
+        .loading-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #888;
+            padding: 16px;
+        }
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(0, 210, 255, 0.3);
+            border-top-color: #00d2ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .auto-badge {
+            background: #2ed573;
+            color: white;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
+        .btn {
+            padding: 14px 28px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+        .btn-primary {
+            background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+            color: white;
+            width: 100%;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 210, 255, 0.4);
+        }
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .task-list {
+            margin-top: 20px;
+        }
+        .task-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .task-filename {
+            font-weight: 500;
+        }
+        .task-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        .status-pending {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }
+        .status-processing {
+            background: rgba(0, 210, 255, 0.2);
+            color: #00d2ff;
+        }
+        .status-completed {
+            background: rgba(46, 213, 115, 0.2);
+            color: #2ed573;
+        }
+        .status-failed {
+            background: rgba(255, 71, 87, 0.2);
+            color: #ff4757;
+        }
+        .task-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .btn-download {
+            background: #2ed573;
+            color: white;
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+        .btn-delete {
+            background: #ff4757;
+            color: white;
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+        .progress-bar {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        .progress-fill.processing {
+            animation: progress-animation 1.5s infinite;
+        }
+        @keyframes progress-animation {
+            0% { width: 0%; }
+            50% { width: 70%; }
+            100% { width: 100%; }
+        }
+        .error-msg {
+            color: #ff4757;
+            font-size: 0.85rem;
+            margin-top: 8px;
+        }
+        .empty-state {
+            text-align: center;
+            color: #666;
+            padding: 40px;
+        }
+        .api-link {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .api-link a {
+            color: #00d2ff;
+            text-decoration: none;
+        }
+        .api-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>RVC PTH to ONNX Exporter</h1>
+        <p class="subtitle">将 RVC .pth 模型文件转换为 ONNX 格式</p>
+
+        <div class="card">
+            <h2 class="card-title">上传文件</h2>
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <p>拖拽 .pth 文件到此处，或点击选择文件</p>
+                <input type="file" id="fileInput" class="file-input" multiple accept=".pth">
+            </div>
+            <div class="file-list" id="fileList"></div>
+
+            <div class="model-info" id="modelInfo">
+                <div class="model-info-title">
+                    <span>📊</span>
+                    <span>模型信息</span>
+                    <span class="auto-badge">自动探测</span>
+                </div>
+                <div class="model-info-grid" id="modelInfoGrid"></div>
+            </div>
+
+            <div class="loading-info" id="loadingInfo" style="display: none;">
+                <div class="spinner"></div>
+                <span>正在读取模型信息...</span>
+            </div>
+
+            <div class="options">
+                <div class="option-group">
+                    <label>Hidden Channels</label>
+                    <input type="number" id="hiddenChannels" value="256">
+                </div>
+                <div class="option-group">
+                    <label>Opset Version</label>
+                    <input type="number" id="opsetVersion" value="16">
+                </div>
+            </div>
+
+            <div class="checkbox-group">
+                <input type="checkbox" id="quantizeFp16">
+                <label for="quantizeFp16">启用 FP16 量化</label>
+                <span class="hint">(减小模型体积约50%，提升推理速度)</span>
+            </div>
+
+            <button class="btn btn-primary" id="convertBtn" disabled>开始转换</button>
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">转换任务</h2>
+            <div class="task-list" id="taskList">
+                <div class="empty-state">暂无转换任务</div>
+            </div>
+        </div>
+
+        <div class="api-link">
+            <a href="/docs" target="_blank">查看 API 文档</a>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        let selectedFiles = [];
+        let tasks = {};
+        let modelInfo = null;
+
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const convertBtn = document.getElementById('convertBtn');
+        const taskList = document.getElementById('taskList');
+        const modelInfoDiv = document.getElementById('modelInfo');
+        const modelInfoGrid = document.getElementById('modelInfoGrid');
+        const loadingInfo = document.getElementById('loadingInfo');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        async function handleFiles(files) {
+            selectedFiles = [];
+            modelInfo = null;
+            modelInfoDiv.classList.remove('show');
+            
+            for (const file of files) {
+                if (file.name.endsWith('.pth') && !selectedFiles.find(f => f.name === file.name)) {
+                    selectedFiles.push(file);
+                }
+            }
+            updateFileList();
+            convertBtn.disabled = selectedFiles.length === 0;
+
+            if (selectedFiles.length === 1) {
+                await detectModelInfo(selectedFiles[0]);
+            }
+        }
+
+        async function detectModelInfo(file) {
+            loadingInfo.style.display = 'flex';
+            
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch(`${API_BASE}/model/info`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    modelInfo = await response.json();
+                    displayModelInfo(modelInfo);
+                    document.getElementById('hiddenChannels').value = modelInfo.hidden_channels;
+                }
+            } catch (error) {
+                console.error('Failed to detect model info:', error);
+            } finally {
+                loadingInfo.style.display = 'none';
+            }
+        }
+
+        function displayModelInfo(info) {
+            const infoItems = [
+                { label: '版本', value: info.version },
+                { label: 'Hidden Channels', value: info.hidden_channels },
+                { label: 'Inter Channels', value: info.inter_channels },
+                { label: 'Filter Channels', value: info.filter_channels },
+                { label: '注意力头数', value: info.n_heads },
+                { label: 'Transformer层数', value: info.n_layers },
+                { label: '卷积核大小', value: info.kernel_size },
+                { label: '说话人维度', value: info.spk_embed_dim },
+                { label: 'Gin Channels', value: info.gin_channels },
+                { label: '采样率', value: info.sample_rate + ' Hz' },
+                { label: 'Phone维度', value: info.phone_dim },
+                { label: '文件名', value: info.filename }
+            ];
+
+            modelInfoGrid.innerHTML = infoItems.map(item => `
+                <div class="model-info-item">
+                    <label>${item.label}</label>
+                    <span>${item.value}</span>
+                </div>
+            `).join('');
+
+            modelInfoDiv.classList.add('show');
+        }
+
+        function updateFileList() {
+            if (selectedFiles.length === 0) {
+                fileList.innerHTML = '';
+                return;
+            }
+            fileList.innerHTML = selectedFiles.map((file, index) => `
+                <div class="file-item">
+                    <div class="file-name">
+                        <span>📄</span>
+                        <span>${file.name}</span>
+                        <span style="color: #888; font-size: 0.85rem;">(${formatSize(file.size)})</span>
+                    </div>
+                    <button class="remove-btn" onclick="removeFile(${index})">×</button>
+                </div>
+            `).join('');
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            modelInfo = null;
+            modelInfoDiv.classList.remove('show');
+            updateFileList();
+            convertBtn.disabled = selectedFiles.length === 0;
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        convertBtn.addEventListener('click', async () => {
+            if (selectedFiles.length === 0) return;
+
+            const hiddenChannels = document.getElementById('hiddenChannels').value;
+            const opsetVersion = document.getElementById('opsetVersion').value;
+            const quantizeFp16 = document.getElementById('quantizeFp16').checked;
+
+            convertBtn.disabled = true;
+            convertBtn.textContent = '转换中...';
+
+            for (const file of selectedFiles) {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('hidden_channels', hiddenChannels);
+                formData.append('opset_version', opsetVersion);
+                formData.append('quantize_fp16', quantizeFp16.toString());
+
+                try {
+                    const response = await fetch(`${API_BASE}/export/single`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const result = await response.json();
+                    tasks[result.task_id] = {
+                        ...result,
+                        filename: file.name
+                    };
+                } catch (error) {
+                    console.error('Export failed:', error);
+                }
+            }
+
+            selectedFiles = [];
+            updateFileList();
+            convertBtn.disabled = false;
+            convertBtn.textContent = '开始转换';
+            
+            updateTaskList();
+            startPolling();
+        });
+
+        function updateTaskList() {
+            const taskIds = Object.keys(tasks);
+            if (taskIds.length === 0) {
+                taskList.innerHTML = '<div class="empty-state">暂无转换任务</div>';
+                return;
+            }
+
+            taskList.innerHTML = taskIds.map(taskId => {
+                const task = tasks[taskId];
+                const statusClass = `status-${task.status}`;
+                const statusText = {
+                    'pending': '等待中',
+                    'processing': '处理中',
+                    'completed': '已完成',
+                    'failed': '失败'
+                }[task.status] || task.status;
+
+                let actionsHtml = '';
+                if (task.status === 'completed') {
+                    actionsHtml = `<button class="btn btn-download" onclick="downloadFile('${taskId}')">下载 ONNX</button>`;
+                }
+                actionsHtml += `<button class="btn btn-delete" onclick="deleteTask('${taskId}')">删除</button>`;
+
+                let progressHtml = '';
+                if (task.status === 'processing') {
+                    progressHtml = `<div class="progress-bar"><div class="progress-fill processing"></div></div>`;
+                }
+
+                let errorHtml = '';
+                if (task.error) {
+                    errorHtml = `<div class="error-msg">${task.error}</div>`;
+                }
+
+                return `
+                    <div class="task-item">
+                        <div class="task-header">
+                            <span class="task-filename">📄 ${task.filename}</span>
+                            <span class="task-status ${statusClass}">${statusText}</span>
+                        </div>
+                        ${progressHtml}
+                        ${errorHtml}
+                        <div class="task-actions">${actionsHtml}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function downloadFile(taskId) {
+            window.open(`${API_BASE}/download/${taskId}`, '_blank');
+        }
+
+        async function deleteTask(taskId) {
+            try {
+                await fetch(`${API_BASE}/task/${taskId}`, { method: 'DELETE' });
+                delete tasks[taskId];
+                updateTaskList();
+            } catch (error) {
+                console.error('Delete failed:', error);
+            }
+        }
+
+        let pollingInterval = null;
+
+        function startPolling() {
+            if (pollingInterval) return;
+            
+            pollingInterval = setInterval(async () => {
+                const pendingTasks = Object.keys(tasks).filter(
+                    taskId => tasks[taskId].status === 'pending' || tasks[taskId].status === 'processing'
+                );
+
+                if (pendingTasks.length === 0) {
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    return;
+                }
+
+                for (const taskId of pendingTasks) {
+                    try {
+                        const response = await fetch(`${API_BASE}/status/${taskId}`);
+                        const result = await response.json();
+                        tasks[taskId] = {
+                            ...tasks[taskId],
+                            ...result,
+                            filename: tasks[taskId].filename
+                        };
+                    } catch (error) {
+                        console.error('Status check failed:', error);
+                    }
+                }
+                updateTaskList();
+            }, 2000);
+        }
+
+        async function loadExistingTasks() {
+            try {
+                const response = await fetch(`${API_BASE}/tasks`);
+                const result = await response.json();
+                if (result.tasks) {
+                    result.tasks.forEach(task => {
+                        tasks[task.task_id] = {
+                            ...task,
+                            filename: task.input_file
+                        };
+                    });
+                    updateTaskList();
+                    
+                    const hasActiveTasks = Object.values(tasks).some(
+                        t => t.status === 'pending' || t.status === 'processing'
+                    );
+                    if (hasActiveTasks) {
+                        startPolling();
+                    }
+                }
+            } catch (error) {
+                console.error('Load tasks failed:', error);
+            }
+        }
+
+        loadExistingTasks();
+    </script>
+</body>
+</html>

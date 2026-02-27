@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  onnx-exporter:
+    build: .
+    container_name: rvc-onnx-exporter
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./exported_onnx:/app/exported_onnx
+      - ./uploaded_pth:/app/uploaded_pth
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

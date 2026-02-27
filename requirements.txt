@@ -1,0 +1,7 @@
+torch>=1.13.0
+numpy>=1.21.0
+fastapi>=0.95.0
+uvicorn>=0.21.0
+python-multipart>=0.0.6
+onnx>=1.14.0
+onnxconverter-common>=1.14.0
