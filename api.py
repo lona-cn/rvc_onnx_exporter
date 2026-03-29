@@ -20,18 +20,45 @@ from infer_pack.models_onnx import SynthesizerTrnMsNSFsidM
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# ============================================================
+# Configuration via Environment Variables
+# ============================================================
+def get_config():
+    """Get configuration from environment variables."""
+    return {
+        "port": int(os.getenv("PORT", "8000")),
+        "host": os.getenv("HOST", "0.0.0.0"),
+        "data_dir": Path(os.getenv("DATA_DIR", "data")),
+        "cleanup_interval_minutes": int(os.getenv("CLEANUP_INTERVAL_MINUTES", "5")),
+        "file_expire_minutes": int(os.getenv("FILE_EXPIRE_MINUTES", "30")),
+    }
+
+
+# Initialize config
+config = get_config()
+
+# Set up data directories based on DATA_DIR
+BASE_DATA_DIR = config["data_dir"]
+EXPORT_DIR = BASE_DATA_DIR / "exported_onnx"
+UPLOAD_DIR = BASE_DATA_DIR / "uploaded_pth"
+STATIC_DIR = BASE_DATA_DIR / "static"
+
+# Create directories if they don't exist
+EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+
+logger.info(f"Configuration: {config}")
+logger.info(
+    f"Data directories: EXPORT_DIR={EXPORT_DIR}, UPLOAD_DIR={UPLOAD_DIR}, STATIC_DIR={STATIC_DIR}"
+)
+
 app = FastAPI(
     title="RVC PTH to ONNX Exporter",
     description="HTTP API for batch converting RVC .pth model files to ONNX format",
-    version="1.0.0"
+    version="1.0.0",
 )
-
-EXPORT_DIR = Path("exported_onnx")
-UPLOAD_DIR = Path("uploaded_pth")
-STATIC_DIR = Path("static")
-EXPORT_DIR.mkdir(exist_ok=True)
-UPLOAD_DIR.mkdir(exist_ok=True)
-STATIC_DIR.mkdir(exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -39,51 +66,71 @@ export_tasks = {}
 
 
 async def cleanup_old_files():
-    """清理过期的文件，防止存储空间占用过大"""
+    """Clean up expired files based on configuration."""
+    # Initialize config for cleanup settings
+    current_config = config
+    expire_seconds = current_config["file_expire_minutes"] * 60
+
     while True:
         try:
-            # 清理uploaded_pth目录
-            uploaded_pth_dir = UPLOAD_DIR
-            if uploaded_pth_dir.exists():
-                for file in uploaded_pth_dir.iterdir():
+            # Refresh config to get latest settings
+            current_config = get_config()
+            expire_seconds = current_config["file_expire_minutes"] * 60
+
+            # Clean uploaded_pth directory
+            if UPLOAD_DIR.exists():
+                for file in UPLOAD_DIR.iterdir():
                     if file.is_file():
-                        # 检查文件修改时间，超过1小时的文件将被删除
-                        if datetime.now().timestamp() - file.stat().st_mtime > 1 * 3600:
+                        if (
+                            datetime.now().timestamp() - file.stat().st_mtime
+                            > expire_seconds
+                        ):
                             os.remove(file)
                             logger.info(f"Removed old uploaded file: {file.name}")
-            
-            # 清理exported_onnx目录
-            exported_onnx_dir = EXPORT_DIR
-            if exported_onnx_dir.exists():
-                for file in exported_onnx_dir.iterdir():
+
+            # Clean exported_onnx directory
+            if EXPORT_DIR.exists():
+                for file in EXPORT_DIR.iterdir():
                     if file.is_file():
-                        # 检查文件修改时间，超过1小时的文件将被删除
-                        if datetime.now().timestamp() - file.stat().st_mtime > 1 * 3600:
+                        if (
+                            datetime.now().timestamp() - file.stat().st_mtime
+                            > expire_seconds
+                        ):
                             os.remove(file)
                             logger.info(f"Removed old exported file: {file.name}")
-            
-            # 清理过期的任务记录
+
+            # Clean expired task records
             expired_tasks = []
             for task_id, task in export_tasks.items():
-                # 检查任务是否已完成且超过1小时
-                if task.status == "completed" and datetime.now().timestamp() - os.path.getmtime(task.output_file) > 1 * 3600:
-                    # 删除相关文件
-                    if task.input_file and os.path.exists(task.input_file):
-                        os.remove(task.input_file)
-                    if task.output_file and os.path.exists(task.output_file):
-                        os.remove(task.output_file)
-                    expired_tasks.append(task_id)
-            
-            # 从任务列表中移除过期任务
+                if (
+                    task.status == "completed"
+                    and task.output_file
+                    and os.path.exists(task.output_file)
+                ):
+                    if (
+                        datetime.now().timestamp() - os.path.getmtime(task.output_file)
+                        > expire_seconds
+                    ):
+                        if task.input_file and os.path.exists(task.input_file):
+                            os.remove(task.input_file)
+                        if task.output_file and os.path.exists(task.output_file):
+                            os.remove(task.output_file)
+                        expired_tasks.append(task_id)
+
+            # Remove expired tasks from memory
             for task_id in expired_tasks:
                 del export_tasks[task_id]
                 logger.info(f"Removed expired task: {task_id}")
-            
+
+            logger.info(
+                f"Cleanup completed. Removed {len(expired_tasks)} expired tasks."
+            )
+
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")
-        
-        # 每6小时执行一次清理
-        await asyncio.sleep(6 * 3600)
+
+        # Wait for the configured interval (default 5 minutes)
+        await asyncio.sleep(current_config["cleanup_interval_minutes"] * 60)
 
 
 class ExportTask(BaseModel):
@@ -126,15 +173,15 @@ class ModelInfo(BaseModel):
 
 def get_model_info(pth_path: str, filename: str) -> ModelInfo:
     cpt = torch.load(pth_path, map_location="cpu", weights_only=False)
-    
+
     config = cpt["config"]
     version = cpt.get("version", "v2")
-    
+
     if version == "v1":
         phone_dim = 256
     else:
         phone_dim = 768
-    
+
     return ModelInfo(
         filename=filename,
         version=version,
@@ -148,125 +195,127 @@ def get_model_info(pth_path: str, filename: str) -> ModelInfo:
         gin_channels=config[16],
         sample_rate=config[17] if isinstance(config[17], int) else 48000,
         phone_dim=phone_dim,
-        config=config
+        config=config,
     )
 
 
 def export_pth_to_onnx(
-        pth_path: str,
-        output_path: str,
-        hidden_channels: int = 256,
-        opset_version: int = 16,
-        quantize_fp16: bool = False
-    ) -> bool:
-        temp_output_path = None
-        try:
-            cpt = torch.load(pth_path, map_location="cpu", weights_only=False)
-            cpt["config"][-3] = cpt["weight"]["emb_g.weight"].shape[0]
-            
-            logger.info(f"Model config: {cpt['config']}")
-            
-            version = cpt.get("version", "v2")
-            logger.info(f"Model version: {version}")
-            logger.info(f"FP16 quantization: {quantize_fp16}")
-            
-            if version == "v1":
-                phone_dim = 256
-            else:
-                phone_dim = 768
-            
-            device = "cpu"
-            is_half = quantize_fp16
+    pth_path: str,
+    output_path: str,
+    hidden_channels: int = 256,
+    opset_version: int = 16,
+    quantize_fp16: bool = False,
+) -> bool:
+    temp_output_path = None
+    try:
+        cpt = torch.load(pth_path, map_location="cpu", weights_only=False)
+        cpt["config"][-3] = cpt["weight"]["emb_g.weight"].shape[0]
 
-            # 准备测试输入
-            test_phone = torch.rand(1, 200, phone_dim)
-            test_phone_lengths = torch.tensor([200]).long()
-            test_pitch = torch.randint(size=(1, 200), low=5, high=255)
-            test_pitchf = torch.rand(1, 200)
-            test_ds = torch.LongTensor([0])
-            test_rnd = torch.rand(1, 192, 200)
+        logger.info(f"Model config: {cpt['config']}")
 
-            # 总是使用FP32导出，然后通过ONNX工具转换为FP16
-            net_g = SynthesizerTrnMsNSFsidM(*cpt["config"], version, is_half=False)
-            net_g.load_state_dict(cpt["weight"], strict=False)
-            net_g.eval()
-            
-            # 导出为FP32模型
-            temp_output_path = output_path + ".temp"
-            logger.info(f"Exporting to temporary path: {temp_output_path}")
-            
-            torch.onnx.export(
-                net_g,
-                (
-                    test_phone.to(device),
-                    test_phone_lengths.to(device),
-                    test_pitch.to(device),
-                    test_pitchf.to(device),
-                    test_ds.to(device),
-                    test_rnd.to(device),
-                ),
-                temp_output_path,
-                dynamic_axes={
-                    "phone": [1],
-                    "pitch": [1],
-                    "pitchf": [1],
-                    "rnd": [2],
-                },
-                do_constant_folding=False,
-                opset_version=opset_version,
-                verbose=False,
-                input_names=["phone", "phone_lengths", "pitch", "pitchf", "ds", "rnd"],
-                output_names=["audio"],
-            )
-            
-            logger.info(f"Successfully exported to temporary path: {temp_output_path}")
-            
-            # 如果需要FP16量化，使用ONNX工具进行转换
-            if quantize_fp16:
-                logger.info("Converting to FP16...")
-                try:
-                    # 加载导出的ONNX模型
-                    model = onnx.load(temp_output_path)
-                    logger.info(f"Loaded model with {len(model.graph.node)} nodes")
-                    # 转换为FP16
-                    model_fp16 = float16.convert_float_to_float16(model)
-                    logger.info(f"Converted model with {len(model_fp16.graph.node)} nodes")
-                    # 保存FP16模型
-                    onnx.save(model_fp16, output_path)
-                    logger.info("Successfully converted to FP16")
-                except Exception as e:
-                    logger.error(f"Error during FP16 conversion: {str(e)}")
-                    logger.error(f"Stack trace: {traceback.format_exc()}")
-                    # 如果转换失败，使用原始的FP32模型
-                    logger.warning("Falling back to FP32 model")
-                    import shutil
-                    shutil.copy(temp_output_path, output_path)
-            else:
-                # 直接使用FP32模型
+        version = cpt.get("version", "v2")
+        logger.info(f"Model version: {version}")
+        logger.info(f"FP16 quantization: {quantize_fp16}")
+
+        if version == "v1":
+            phone_dim = 256
+        else:
+            phone_dim = 768
+
+        device = "cpu"
+        is_half = quantize_fp16
+
+        # 准备测试输入
+        test_phone = torch.rand(1, 200, phone_dim)
+        test_phone_lengths = torch.tensor([200]).long()
+        test_pitch = torch.randint(size=(1, 200), low=5, high=255)
+        test_pitchf = torch.rand(1, 200)
+        test_ds = torch.LongTensor([0])
+        test_rnd = torch.rand(1, 192, 200)
+
+        # 总是使用FP32导出，然后通过ONNX工具转换为FP16
+        net_g = SynthesizerTrnMsNSFsidM(*cpt["config"], version, is_half=False)
+        net_g.load_state_dict(cpt["weight"], strict=False)
+        net_g.eval()
+
+        # 导出为FP32模型
+        temp_output_path = output_path + ".temp"
+        logger.info(f"Exporting to temporary path: {temp_output_path}")
+
+        torch.onnx.export(
+            net_g,
+            (
+                test_phone.to(device),
+                test_phone_lengths.to(device),
+                test_pitch.to(device),
+                test_pitchf.to(device),
+                test_ds.to(device),
+                test_rnd.to(device),
+            ),
+            temp_output_path,
+            dynamic_axes={
+                "phone": [1],
+                "pitch": [1],
+                "pitchf": [1],
+                "rnd": [2],
+            },
+            do_constant_folding=False,
+            opset_version=opset_version,
+            verbose=False,
+            input_names=["phone", "phone_lengths", "pitch", "pitchf", "ds", "rnd"],
+            output_names=["audio"],
+        )
+
+        logger.info(f"Successfully exported to temporary path: {temp_output_path}")
+
+        # 如果需要FP16量化，使用ONNX工具进行转换
+        if quantize_fp16:
+            logger.info("Converting to FP16...")
+            try:
+                # 加载导出的ONNX模型
+                model = onnx.load(temp_output_path)
+                logger.info(f"Loaded model with {len(model.graph.node)} nodes")
+                # 转换为FP16
+                model_fp16 = float16.convert_float_to_float16(model)
+                logger.info(f"Converted model with {len(model_fp16.graph.node)} nodes")
+                # 保存FP16模型
+                onnx.save(model_fp16, output_path)
+                logger.info("Successfully converted to FP16")
+            except Exception as e:
+                logger.error(f"Error during FP16 conversion: {str(e)}")
+                logger.error(f"Stack trace: {traceback.format_exc()}")
+                # 如果转换失败，使用原始的FP32模型
+                logger.warning("Falling back to FP32 model")
                 import shutil
+
                 shutil.copy(temp_output_path, output_path)
-                logger.info("Using FP32 model")
-            
-            # 检查生成的文件大小
-            if os.path.exists(output_path):
-                file_size = os.path.getsize(output_path)
-                logger.info(f"Generated file size: {file_size / 1024 / 1024:.2f} MB")
-            
-            logger.info(f"Successfully exported {pth_path} to {output_path}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to export {pth_path}: {str(e)}")
-            logger.error(f"Stack trace: {traceback.format_exc()}")
-            raise e
-        finally:
-            # 删除临时文件
-            if temp_output_path and os.path.exists(temp_output_path):
-                try:
-                    os.remove(temp_output_path)
-                    logger.info(f"Removed temporary file: {temp_output_path}")
-                except Exception as e:
-                    logger.error(f"Failed to remove temporary file: {str(e)}")
+        else:
+            # 直接使用FP32模型
+            import shutil
+
+            shutil.copy(temp_output_path, output_path)
+            logger.info("Using FP32 model")
+
+        # 检查生成的文件大小
+        if os.path.exists(output_path):
+            file_size = os.path.getsize(output_path)
+            logger.info(f"Generated file size: {file_size / 1024 / 1024:.2f} MB")
+
+        logger.info(f"Successfully exported {pth_path} to {output_path}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to export {pth_path}: {str(e)}")
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        raise e
+    finally:
+        # 删除临时文件
+        if temp_output_path and os.path.exists(temp_output_path):
+            try:
+                os.remove(temp_output_path)
+                logger.info(f"Removed temporary file: {temp_output_path}")
+            except Exception as e:
+                logger.error(f"Failed to remove temporary file: {str(e)}")
 
 
 async def export_task_wrapper(
@@ -275,23 +324,23 @@ async def export_task_wrapper(
     output_path: str,
     hidden_channels: int,
     opset_version: int,
-    quantize_fp16: bool = False
+    quantize_fp16: bool = False,
 ):
     try:
         export_tasks[task_id].status = "processing"
-        
+
         await asyncio.to_thread(
             export_pth_to_onnx,
             pth_path,
             output_path,
             hidden_channels,
             opset_version,
-            quantize_fp16
+            quantize_fp16,
         )
-        
+
         export_tasks[task_id].status = "completed"
         export_tasks[task_id].output_file = output_path
-        
+
     except Exception as e:
         export_tasks[task_id].status = "failed"
         export_tasks[task_id].error = str(e)
@@ -304,17 +353,17 @@ async def root():
 
 @app.post("/model/info", response_model=ModelInfo)
 async def get_pth_info(file: UploadFile = File(...)):
-    if not file.filename.endswith('.pth'):
+    if not file.filename.endswith(".pth"):
         raise HTTPException(status_code=400, detail="Only .pth files are supported")
-    
+
     temp_id = str(uuid.uuid4())
     temp_path = UPLOAD_DIR / f"{temp_id}_{file.filename}"
-    
+
     try:
         with open(temp_path, "wb") as f:
             content = await file.read()
             f.write(content)
-        
+
         info = get_model_info(str(temp_path), file.filename)
         return info
     finally:
@@ -328,30 +377,30 @@ async def export_single(
     file: UploadFile = File(...),
     hidden_channels: int = Form(256),
     opset_version: int = Form(16),
-    quantize_fp16: str = Form("false")
+    quantize_fp16: str = Form("false"),
 ):
     # 转换字符串为布尔值
     quantize_fp16 = quantize_fp16.lower() == "true"
-    if not file.filename.endswith('.pth'):
+    if not file.filename.endswith(".pth"):
         raise HTTPException(status_code=400, detail="Only .pth files are supported")
-    
+
     task_id = str(uuid.uuid4())
     pth_path = UPLOAD_DIR / f"{task_id}_{file.filename}"
-    output_filename = file.filename.replace('.pth', '.onnx')
+    output_filename = file.filename.replace(".pth", ".onnx")
     output_path = EXPORT_DIR / f"{task_id}_{output_filename}"
-    
+
     with open(pth_path, "wb") as f:
         content = await file.read()
         f.write(content)
-    
+
     export_tasks[task_id] = ExportTask(
-        task_id=task_id,
-        status="pending",
-        input_file=str(pth_path)
+        task_id=task_id, status="pending", input_file=str(pth_path)
     )
-    
-    logger.info(f"Received export request: hidden_channels={hidden_channels}, opset_version={opset_version}, quantize_fp16={quantize_fp16}")
-    
+
+    logger.info(
+        f"Received export request: hidden_channels={hidden_channels}, opset_version={opset_version}, quantize_fp16={quantize_fp16}"
+    )
+
     background_tasks.add_task(
         export_task_wrapper,
         task_id,
@@ -359,14 +408,14 @@ async def export_single(
         str(output_path),
         hidden_channels,
         opset_version,
-        quantize_fp16
+        quantize_fp16,
     )
-    
+
     return ExportResult(
         task_id=task_id,
         status="pending",
         input_file=file.filename,
-        download_url=f"/download/{task_id}"
+        download_url=f"/download/{task_id}",
     )
 
 
@@ -376,31 +425,29 @@ async def export_batch(
     files: List[UploadFile] = File(...),
     hidden_channels: int = Form(256),
     opset_version: int = Form(16),
-    quantize_fp16: str = Form("false")
+    quantize_fp16: str = Form("false"),
 ):
     # 转换字符串为布尔值
     quantize_fp16 = quantize_fp16.lower() == "true"
     results = []
-    
+
     for file in files:
-        if not file.filename.endswith('.pth'):
+        if not file.filename.endswith(".pth"):
             continue
-        
+
         task_id = str(uuid.uuid4())
         pth_path = UPLOAD_DIR / f"{task_id}_{file.filename}"
-        output_filename = file.filename.replace('.pth', '.onnx')
+        output_filename = file.filename.replace(".pth", ".onnx")
         output_path = EXPORT_DIR / f"{task_id}_{output_filename}"
-        
+
         with open(pth_path, "wb") as f:
             content = await file.read()
             f.write(content)
-        
+
         export_tasks[task_id] = ExportTask(
-            task_id=task_id,
-            status="pending",
-            input_file=str(pth_path)
+            task_id=task_id, status="pending", input_file=str(pth_path)
         )
-        
+
         background_tasks.add_task(
             export_task_wrapper,
             task_id,
@@ -408,16 +455,18 @@ async def export_batch(
             str(output_path),
             hidden_channels,
             opset_version,
-            quantize_fp16
+            quantize_fp16,
         )
-        
-        results.append(ExportResult(
-            task_id=task_id,
-            status="pending",
-            input_file=file.filename,
-            download_url=f"/download/{task_id}"
-        ))
-    
+
+        results.append(
+            ExportResult(
+                task_id=task_id,
+                status="pending",
+                input_file=file.filename,
+                download_url=f"/download/{task_id}",
+            )
+        )
+
     return results
 
 
@@ -425,7 +474,7 @@ async def export_batch(
 async def get_status(task_id: str):
     if task_id not in export_tasks:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     task = export_tasks[task_id]
     return ExportResult(
         task_id=task.task_id,
@@ -433,7 +482,7 @@ async def get_status(task_id: str):
         input_file=Path(task.input_file).name,
         output_file=Path(task.output_file).name if task.output_file else None,
         download_url=f"/download/{task_id}" if task.status == "completed" else None,
-        error=task.error
+        error=task.error,
     )
 
 
@@ -441,15 +490,18 @@ async def get_status(task_id: str):
 async def download_onnx(task_id: str):
     if task_id not in export_tasks:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     task = export_tasks[task_id]
-    
+
     if task.status != "completed":
-        raise HTTPException(status_code=400, detail=f"Task is not completed. Current status: {task.status}")
-    
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task is not completed. Current status: {task.status}",
+        )
+
     if not task.output_file or not os.path.exists(task.output_file):
         raise HTTPException(status_code=404, detail="Output file not found")
-    
+
     # 移除UUID前缀，使用原始文件名
     output_filename = Path(task.output_file).name
     # 提取原始文件名（移除UUID前缀）
@@ -457,14 +509,12 @@ async def download_onnx(task_id: str):
         # 找到第一个下划线的位置
         first_underscore = output_filename.find("_")
         # 提取下划线后的部分作为新文件名
-        clean_filename = output_filename[first_underscore + 1:]
+        clean_filename = output_filename[first_underscore + 1 :]
     else:
         clean_filename = output_filename
-    
+
     return FileResponse(
-        task.output_file,
-        media_type="application/octet-stream",
-        filename=clean_filename
+        task.output_file, media_type="application/octet-stream", filename=clean_filename
     )
 
 
@@ -476,8 +526,10 @@ async def list_tasks():
                 "task_id": task.task_id,
                 "status": task.status,
                 "input_file": Path(task.input_file).name,
-                "output_file": Path(task.output_file).name if task.output_file else None,
-                "error": task.error
+                "output_file": Path(task.output_file).name
+                if task.output_file
+                else None,
+                "error": task.error,
             }
             for task in export_tasks.values()
         ]
@@ -488,28 +540,56 @@ async def list_tasks():
 async def delete_task(task_id: str):
     if task_id not in export_tasks:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     task = export_tasks[task_id]
-    
+
     if task.input_file and os.path.exists(task.input_file):
         os.remove(task.input_file)
-    
+
     if task.output_file and os.path.exists(task.output_file):
         os.remove(task.output_file)
-    
+
     del export_tasks[task_id]
-    
+
     return {"message": "Task deleted successfully"}
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for container orchestration."""
+    return {
+        "status": "healthy",
+        "config": {
+            "port": config["port"],
+            "data_dir": str(config["data_dir"]),
+            "cleanup_interval_minutes": config["cleanup_interval_minutes"],
+            "file_expire_minutes": config["file_expire_minutes"],
+        },
+        "directories": {
+            "export_dir": str(EXPORT_DIR),
+            "upload_dir": str(UPLOAD_DIR),
+            "static_dir": str(STATIC_DIR),
+        },
+    }
 
 
 @app.on_event("startup")
 async def startup_event():
-    """服务启动时执行的任务"""
-    # 启动清理任务
+    """Run startup tasks."""
+    # Run cleanup immediately on startup
+    try:
+        # Create a synchronous wrapper for cleanup
+        await cleanup_old_files()
+    except Exception as e:
+        logger.error(f"Error during startup cleanup: {str(e)}")
+
+    # Start periodic cleanup task
     asyncio.create_task(cleanup_old_files())
     logger.info("Cleanup task started")
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    # Use configuration from environment variables
+    uvicorn.run(app, host=config["host"], port=config["port"])

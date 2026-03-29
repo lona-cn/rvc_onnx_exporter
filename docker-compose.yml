@@ -5,10 +5,20 @@ services:
     build: .
     container_name: rvc-onnx-exporter
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:${PORT:-8000}"
     volumes:
-      - ./exported_onnx:/app/exported_onnx
-      - ./uploaded_pth:/app/uploaded_pth
+      - ${DATA_DIR:-./data}:/app/data
     environment:
+      - PORT=${PORT:-8000}
+      - HOST=0.0.0.0
+      - DATA_DIR=/app/data
+      - CLEANUP_INTERVAL_MINUTES=${CLEANUP_INTERVAL_MINUTES:-5}
+      - FILE_EXPIRE_MINUTES=${FILE_EXPIRE_MINUTES:-30}
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

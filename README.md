@@ -100,6 +100,144 @@ A: 请检查模型文件是否完整，以及是否符合 RVC 模型格式要求
 ### Q: What should I do if I encounter errors during conversion?
 A: Please check if the model file is complete and conforms to the RVC model format requirements. If the problem persists, please check the service logs for detailed error information.
 
+## 容器化部署 (Docker)
+
+### 环境变量
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `PORT` | `8000` | 服务监听端口 |
+| `HOST` | `0.0.0.0` | 服务监听地址 |
+| `DATA_DIR` | `/app/data` | 数据存储目录 |
+| `CLEANUP_INTERVAL_MINUTES` | `5` | 清理任务执行间隔（分钟） |
+| `FILE_EXPIRE_MINUTES` | `30` | 文件过期时间（分钟） |
+
+### Docker Compose 快速部署
+
+```bash
+# 克隆项目
+git clone https://github.com/yourusername/rvc_onnx_exporter.git
+cd rvc_onnx_exporter
+
+# 启动服务（使用默认配置）
+docker-compose up -d
+
+# 自定义配置启动
+PORT=8080 DATA_DIR=/data docker-compose up -d
+```
+
+### Docker 手动部署
+
+```bash
+# 构建镜像
+docker build -t rvc-onnx-exporter .
+
+# 运行容器
+docker run -d \
+  -p 8000:8000 \
+  -v ./data:/app/data \
+  -e PORT=8000 \
+  -e CLEANUP_INTERVAL_MINUTES=5 \
+  -e FILE_EXPIRE_MINUTES=30 \
+  rvc-onnx-exporter
+```
+
+### 健康检查
+
+服务提供 `/health` 端点用于健康检查：
+
+```bash
+# 检查健康状态
+curl http://localhost:8000/health
+
+# 响应示例
+{
+  "status": "healthy",
+  "config": {
+    "port": 8000,
+    "data_dir": "/app/data",
+    "cleanup_interval_minutes": 5,
+    "file_expire_minutes": 30
+  },
+  "directories": {
+    "export_dir": "/app/data/exported_onnx",
+    "upload_dir": "/app/data/uploaded_pth",
+    "static_dir": "/app/data/static"
+  }
+}
+```
+
+### 数据持久化
+
+通过 `DATA_DIR` 环境变量或 volume 挂载来持久化数据：
+
+```yaml
+# docker-compose.yml
+volumes:
+  - ./my-data:/app/data  # 持久化所有数据
+```
+
+## Container Deployment
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8000` | Service listening port |
+| `HOST` | `0.0.0.0` | Service binding address |
+| `DATA_DIR` | `/app/data` | Data storage directory |
+| `CLEANUP_INTERVAL_MINUTES` | `5` | Cleanup task interval (minutes) |
+| `FILE_EXPIRE_MINUTES` | `30` | File expiration time (minutes) |
+
+### Quick Start with Docker Compose
+
+```bash
+# Clone project
+git clone https://github.com/yourusername/rvc_onnx_exporter.git
+cd rvc-onnx_exporter
+
+# Start service with default config
+docker-compose up -d
+
+# Start with custom config
+PORT=8080 DATA_DIR=/data docker-compose up -d
+```
+
+### Manual Docker Deployment
+
+```bash
+# Build image
+docker build -t rvc-onnx-exporter .
+
+# Run container
+docker run -d \
+  -p 8000:8000 \
+  -v ./data:/app/data \
+  -e PORT=8000 \
+  -e CLEANUP_INTERVAL_MINUTES=5 \
+  -e FILE_EXPIRE_MINUTES=30 \
+  rvc-onnx-exporter
+```
+
+### Health Check
+
+The service provides a `/health` endpoint for health checks:
+
+```bash
+# Check health status
+curl http://localhost:8000/health
+```
+
+### Data Persistence
+
+Persist data using the `DATA_DIR` environment variable or volume mount:
+
+```yaml
+# docker-compose.yml
+volumes:
+  - ./my-data:/app/data  # Persist all data
+```
+
 ## 许可证
 
 本项目采用 MIT 许可证，详见 [LICENSE](LICENSE) 文件。
