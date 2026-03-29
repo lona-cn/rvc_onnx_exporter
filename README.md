@@ -27,7 +27,7 @@ RVC ONNX Exporter is a professional tool for converting RVC (Retrieval-based Voi
 
 ### 环境要求
 - Python 3.9+
-- PyTorch 2.0+
+- PyTorch 2.1.0+ (CPU-only，约 185MB)
 - ONNX 1.14.0+
 - FastAPI
 - Uvicorn
@@ -37,13 +37,15 @@ RVC ONNX Exporter is a professional tool for converting RVC (Retrieval-based Voi
 2. 安装依赖：`pip install -r requirements.txt`
 3. 启动服务：`python api.py`
 
+> 💡 本地安装时，requirements.txt 会自动安装 CPU-only 版本的 PyTorch
+
 服务将在 http://0.0.0.0:8000 上运行。
 
 ## Quick Start
 
 ### Requirements
 - Python 3.9+
-- PyTorch 2.0+
+- PyTorch 2.1.0+ (CPU-only, ~185MB)
 - ONNX 1.14.0+
 - FastAPI
 - Uvicorn
@@ -52,6 +54,8 @@ RVC ONNX Exporter is a professional tool for converting RVC (Retrieval-based Voi
 1. Clone the project: `git clone https://github.com/yourusername/rvc_onnx_exporter.git`
 2. Install dependencies: `pip install -r requirements.txt`
 3. Start the service: `python api.py`
+
+> 💡 The requirements.txt will automatically install CPU-only PyTorch
 
 The service will run on http://0.0.0.0:8000.
 
@@ -128,6 +132,8 @@ docker-compose up -d
 # 自定义配置启动
 PORT=8080 DATA_DIR=/data docker-compose up -d
 ```
+
+> 💡 Docker 镜像使用 CPU-only PyTorch，体积仅约 **1GB**
 
 ### Docker 手动部署
 
