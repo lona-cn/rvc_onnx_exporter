@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 
 import torch
 import onnx
+from onnxconverter_common import float16
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
