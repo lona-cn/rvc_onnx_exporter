@@ -42,12 +42,19 @@ config = get_config()
 BASE_DATA_DIR = config["data_dir"]
 EXPORT_DIR = BASE_DATA_DIR / "exported_onnx"
 UPLOAD_DIR = BASE_DATA_DIR / "uploaded_pth"
-STATIC_DIR = BASE_DATA_DIR / "static"
+
+# Static files are part of the app, not user data
+# In Docker: /app/static, locally: ./static
+import os
+
+if os.path.exists("/app/static"):
+    STATIC_DIR = Path("/app/static")
+else:
+    STATIC_DIR = Path("static")
 
 # Create directories if they don't exist
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 logger.info(f"Configuration: {config}")
 logger.info(
