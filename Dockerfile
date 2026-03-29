@@ -16,11 +16,11 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install CPU-only PyTorch from official index
-# Using --extra-index-url to get CPU-only version (much smaller)
+# IMPORTANT: Install numpy<2 BEFORE torch to avoid compatibility issues
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir "numpy<2.0.0" && \
     pip install --no-cache-dir torch==2.1.0+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html && \
-    pip install --no-cache-dir numpy>=1.21.0 && \
     pip install --no-cache-dir fastapi>=0.95.0 && \
     pip install --no-cache-dir uvicorn>=0.21.0 && \
     pip install --no-cache-dir python-multipart>=0.0.6 && \

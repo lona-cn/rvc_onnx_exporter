@@ -1,6 +1,6 @@
 # PyTorch CPU-only - much smaller than full PyTorch
 torch==2.1.0+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html
-numpy>=1.21.0
+numpy<2.0.0
 fastapi>=0.95.0
 uvicorn>=0.21.0
 python-multipart>=0.0.6

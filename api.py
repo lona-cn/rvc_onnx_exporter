@@ -65,72 +65,75 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 export_tasks = {}
 
 
-async def cleanup_old_files():
-    """Clean up expired files based on configuration."""
-    # Initialize config for cleanup settings
-    current_config = config
-    expire_seconds = current_config["file_expire_minutes"] * 60
+def _do_cleanup():
+    """Synchronous cleanup logic - runs once."""
+    try:
+        current_config = get_config()
+        expire_seconds = current_config["file_expire_minutes"] * 60
 
-    while True:
-        try:
-            # Refresh config to get latest settings
-            current_config = get_config()
-            expire_seconds = current_config["file_expire_minutes"] * 60
-
-            # Clean uploaded_pth directory
-            if UPLOAD_DIR.exists():
-                for file in UPLOAD_DIR.iterdir():
-                    if file.is_file():
-                        if (
-                            datetime.now().timestamp() - file.stat().st_mtime
-                            > expire_seconds
-                        ):
-                            os.remove(file)
-                            logger.info(f"Removed old uploaded file: {file.name}")
-
-            # Clean exported_onnx directory
-            if EXPORT_DIR.exists():
-                for file in EXPORT_DIR.iterdir():
-                    if file.is_file():
-                        if (
-                            datetime.now().timestamp() - file.stat().st_mtime
-                            > expire_seconds
-                        ):
-                            os.remove(file)
-                            logger.info(f"Removed old exported file: {file.name}")
-
-            # Clean expired task records
-            expired_tasks = []
-            for task_id, task in export_tasks.items():
-                if (
-                    task.status == "completed"
-                    and task.output_file
-                    and os.path.exists(task.output_file)
-                ):
+        # Clean uploaded_pth directory
+        if UPLOAD_DIR.exists():
+            for file in UPLOAD_DIR.iterdir():
+                if file.is_file():
                     if (
-                        datetime.now().timestamp() - os.path.getmtime(task.output_file)
+                        datetime.now().timestamp() - file.stat().st_mtime
                         > expire_seconds
                     ):
-                        if task.input_file and os.path.exists(task.input_file):
-                            os.remove(task.input_file)
-                        if task.output_file and os.path.exists(task.output_file):
-                            os.remove(task.output_file)
-                        expired_tasks.append(task_id)
+                        os.remove(file)
+                        logger.info(f"Removed old uploaded file: {file.name}")
 
-            # Remove expired tasks from memory
-            for task_id in expired_tasks:
-                del export_tasks[task_id]
-                logger.info(f"Removed expired task: {task_id}")
+        # Clean exported_onnx directory
+        if EXPORT_DIR.exists():
+            for file in EXPORT_DIR.iterdir():
+                if file.is_file():
+                    if (
+                        datetime.now().timestamp() - file.stat().st_mtime
+                        > expire_seconds
+                    ):
+                        os.remove(file)
+                        logger.info(f"Removed old exported file: {file.name}")
 
-            logger.info(
-                f"Cleanup completed. Removed {len(expired_tasks)} expired tasks."
-            )
+        # Clean expired task records
+        expired_tasks = []
+        for task_id, task in export_tasks.items():
+            if (
+                task.status == "completed"
+                and task.output_file
+                and os.path.exists(task.output_file)
+            ):
+                if (
+                    datetime.now().timestamp() - os.path.getmtime(task.output_file)
+                    > expire_seconds
+                ):
+                    if task.input_file and os.path.exists(task.input_file):
+                        os.remove(task.input_file)
+                    if task.output_file and os.path.exists(task.output_file):
+                        os.remove(task.output_file)
+                    expired_tasks.append(task_id)
 
-        except Exception as e:
-            logger.error(f"Error during cleanup: {str(e)}")
+        for task_id in expired_tasks:
+            del export_tasks[task_id]
+            logger.info(f"Removed expired task: {task_id}")
 
+        logger.info(f"Cleanup completed. Removed {len(expired_tasks)} expired tasks.")
+
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
+
+
+async def cleanup_periodic():
+    """Periodic cleanup task - runs infinitely."""
+    while True:
+        _do_cleanup()
         # Wait for the configured interval (default 5 minutes)
+        current_config = get_config()
         await asyncio.sleep(current_config["cleanup_interval_minutes"] * 60)
+
+
+async def cleanup_old_files():
+    """Clean up expired files based on configuration (one-time cleanup)."""
+    # Initialize config for cleanup settings
+    _do_cleanup()
 
 
 class ExportTask(BaseModel):
@@ -578,13 +581,12 @@ async def startup_event():
     """Run startup tasks."""
     # Run cleanup immediately on startup
     try:
-        # Create a synchronous wrapper for cleanup
-        await cleanup_old_files()
+        _do_cleanup()
     except Exception as e:
         logger.error(f"Error during startup cleanup: {str(e)}")
 
     # Start periodic cleanup task
-    asyncio.create_task(cleanup_old_files())
+    asyncio.create_task(cleanup_periodic())
     logger.info("Cleanup task started")
 
 
