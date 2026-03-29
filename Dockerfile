@@ -15,10 +15,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python dependencies
+# Install CPU-only PyTorch from official index
+# Using --extra-index-url to get CPU-only version (much smaller)
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir torch==2.1.0+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html && \
+    pip install --no-cache-dir numpy>=1.21.0 && \
+    pip install --no-cache-dir fastapi>=0.95.0 && \
+    pip install --no-cache-dir uvicorn>=0.21.0 && \
+    pip install --no-cache-dir python-multipart>=0.0.6 && \
+    pip install --no-cache-dir onnx>=1.14.0 && \
+    pip install --no-cache-dir onnxconverter-common>=1.14.0
 
 
 # ============================================================
@@ -29,7 +36,7 @@ FROM python:3.9-slim
 LABEL maintainer="RVC ONNX Exporter"
 LABEL description="HTTP API for batch converting RVC .pth model files to ONNX format"
 
-# Install runtime dependencies
+# Install runtime dependencies (no build tools needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
