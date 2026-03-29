@@ -124,27 +124,6 @@
             outline: none;
             border-color: #00d2ff;
         }
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 16px;
-        }
-        .checkbox-group input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-        }
-        .checkbox-group label {
-            color: #aaa;
-            font-size: 0.95rem;
-            cursor: pointer;
-        }
-        .checkbox-group .hint {
-            color: #666;
-            font-size: 0.8rem;
-            margin-left: 8px;
-        }
         .model-info {
             background: rgba(0, 210, 255, 0.1);
             border: 1px solid rgba(0, 210, 255, 0.3);
@@ -374,12 +353,6 @@
                 </div>
             </div>
 
-            <div class="checkbox-group">
-                <input type="checkbox" id="quantizeFp16">
-                <label for="quantizeFp16">启用 FP16 量化</label>
-                <span class="hint">(减小模型体积约50%，提升推理速度)</span>
-            </div>
-
             <button class="btn btn-primary" id="convertBtn" disabled>开始转换</button>
         </div>
 
@@ -535,7 +508,6 @@
 
             const hiddenChannels = document.getElementById('hiddenChannels').value;
             const opsetVersion = document.getElementById('opsetVersion').value;
-            const quantizeFp16 = document.getElementById('quantizeFp16').checked;
 
             convertBtn.disabled = true;
             convertBtn.textContent = '转换中...';
@@ -545,7 +517,6 @@
                 formData.append('file', file);
                 formData.append('hidden_channels', hiddenChannels);
                 formData.append('opset_version', opsetVersion);
-                formData.append('quantize_fp16', quantizeFp16.toString());
 
                 try {
                     const response = await fetch(`${API_BASE}/export/single`, {

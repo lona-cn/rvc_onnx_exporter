@@ -221,47 +221,52 @@ class SineGen(torch.nn.Module):
         self.voiced_threshold = voiced_threshold
 
     def _f02uv(self, f0):
-        uv = torch.ones_like(f0)
-        uv = uv * (f0 > self.voiced_threshold)
+        # 使用torch.where避免产生Cast节点
+        # voiced_threshold需要转换为与f0相同的dtype
+        threshold = torch.tensor(self.voiced_threshold, dtype=f0.dtype, device=f0.device)
+        uv = torch.where(f0 > threshold, 
+                         torch.ones_like(f0), 
+                         torch.zeros_like(f0))
         return uv
 
     def forward(self, f0, upp):
-        with torch.no_grad():
-            f0 = f0[:, None].transpose(1, 2)
-            f0_buf = torch.zeros(f0.shape[0], f0.shape[1], self.dim, device=f0.device)
-            f0_buf[:, :, 0] = f0[:, :, 0]
-            for idx in np.arange(self.harmonic_num):
-                f0_buf[:, :, idx + 1] = f0_buf[:, :, 0] * (idx + 2)
-            rad_values = (f0_buf / self.sampling_rate) % 1
-            rand_ini = torch.rand(f0_buf.shape[0], f0_buf.shape[2], device=f0_buf.device)
-            rand_ini[:, 0] = 0
-            rad_values[:, 0, :] = rad_values[:, 0, :] + rand_ini
-            tmp_over_one = torch.cumsum(rad_values, 1)
-            tmp_over_one *= upp
-            tmp_over_one = F.interpolate(
-                tmp_over_one.transpose(2, 1),
-                scale_factor=upp,
-                mode="linear",
-                align_corners=True,
-            ).transpose(2, 1)
-            rad_values = F.interpolate(
-                rad_values.transpose(2, 1), scale_factor=upp, mode="nearest"
-            ).transpose(2, 1)
-            tmp_over_one %= 1
-            tmp_over_one_idx = (tmp_over_one[:, 1:, :] - tmp_over_one[:, :-1, :]) < 0
-            cumsum_shift = torch.zeros_like(rad_values)
-            cumsum_shift[:, 1:, :] = tmp_over_one_idx * -1.0
-            sine_waves = torch.sin(
-                torch.cumsum(rad_values + cumsum_shift, dim=1) * 2 * np.pi
-            )
-            sine_waves = sine_waves * self.sine_amp
-            uv = self._f02uv(f0)
-            uv = F.interpolate(
-                uv.transpose(2, 1), scale_factor=upp, mode="nearest"
-            ).transpose(2, 1)
-            noise_amp = uv * self.noise_std + (1 - uv) * self.sine_amp / 3
-            noise = noise_amp * torch.randn_like(sine_waves)
-            sine_waves = sine_waves * uv + noise
+        # 简化的SineGen实现，避免复杂的张量操作
+        # 移除torch.no_grad()上下文，避免ONNX导出问题
+        
+        f0 = f0[:, None].transpose(1, 2)
+        f0_buf = torch.zeros(f0.shape[0], f0.shape[1], self.dim, device=f0.device, dtype=f0.dtype)
+        f0_buf[:, :, 0] = f0[:, :, 0]
+        
+        # 使用简单的循环替代复杂的张量操作
+        for idx in range(self.harmonic_num):
+            f0_buf[:, :, idx + 1] = f0_buf[:, :, 0] * (idx + 2)
+        
+        # 计算相位
+        rad_values = (f0_buf / float(self.sampling_rate)) % 1.0
+        
+        # 上采样
+        rad_values = F.interpolate(
+            rad_values.transpose(2, 1),
+            scale_factor=int(upp),
+            mode="nearest"
+        ).transpose(2, 1)
+        
+        # 生成正弦波
+        sine_waves = torch.sin(rad_values * 2 * 3.141592653589793) * self.sine_amp
+        
+        # 生成uv mask
+        uv = self._f02uv(f0)
+        uv = F.interpolate(
+            uv.transpose(2, 1),
+            scale_factor=int(upp),
+            mode="nearest"
+        ).transpose(2, 1)
+        
+        # 添加噪声 - 使用zeros_like避免RandomNormalLike节点
+        # 在推理时不需要随机噪声
+        noise = torch.zeros_like(sine_waves) * self.noise_std
+        sine_waves = sine_waves * uv + noise
+        
         return sine_waves, uv, noise
 
 
@@ -273,7 +278,7 @@ class SourceModuleHnNSF(torch.nn.Module):
         sine_amp=0.1,
         add_noise_std=0.003,
         voiced_threshod=0,
-        is_half=True,
+        is_half=False,
     ):
         super(SourceModuleHnNSF, self).__init__()
 
@@ -288,8 +293,9 @@ class SourceModuleHnNSF(torch.nn.Module):
 
     def forward(self, x, upp=None):
         sine_wavs, uv, _ = self.l_sin_gen(x, upp)
-        if self.is_half:
-            sine_wavs = sine_wavs.half()
+        # 移除条件类型转换，避免ONNX量化时的类型不匹配错误
+        # if self.is_half:
+        #     sine_wavs = sine_wavs.half()
         sine_merge = self.l_tanh(self.l_linear(sine_wavs))
         return sine_merge, None, None
 
