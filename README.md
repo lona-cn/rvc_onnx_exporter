@@ -1,5 +1,8 @@
 # RVC ONNX Exporter
 
+[![Docker Hub](https://img.shields.io/docker/pulls/lonacn/rvc_onnx_exporter?style=flat)](https://hub.docker.com/r/lonacn/rvc_onnx_exporter)
+[![Docker Hub](https://img.shields.io/docker/v/lonacn/rvc_onnx_exporter?label=docker%20hub&sort=semver)](https://hub.docker.com/r/lonacn/rvc_onnx_exporter)
+
 ## 项目简介
 
 RVC ONNX Exporter 是一个专业工具，用于将 RVC (Retrieval-based Voice Conversion) 模型从 .pth 格式转换为 ONNX 格式。
